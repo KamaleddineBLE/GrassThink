@@ -3,15 +3,22 @@ import { View, Text } from 'react-native';
 
 export default function SensorCard({ value = "25", unit = "°C", label = "Temperature" }) {
   return (
-    <View className="bg-black/80 rounded-xl   pt-4 w-28 h-28 border  ">
-      <View className="flex-row items-center justify-between mb-1 ml-2">
-        <Text className="text-white text-xl font-interBold ">
-          {value}{unit}
+    <View
+      style={{ backgroundColor: "#282423", zIndex:3 ,width:'30%', height:'90%' }}
+      className=" rounded-xl py-5 px-2  border-l-green-700 border border-green-400"
+    >
+      <View className="flex-row items-center justify-between">
+        <Text className="text-white text-lg font-interSemiBold">
+          {value}
+          <Text className="text-white text-base font-interSemiBold"> {unit}</Text>
         </Text>
       </View>
-      <Text className="text-gray-400 text-xs font-inter ml-2">{label} </Text>
-      <View className='w-24 mt-5 ml-2 h-px bg-gray-400/40'></View>
-     <Text className="text-gray-500 text-[10px] absolute bottom-2 left-2  font-inter">Tap for more details</Text>
+
+      <Text className="text-white/60 text-[12px] font-inter mb-1">{label}</Text>
+      <View className="w-full mt-3 mb-1 h-px bg-gray-400/20" />
+      <Text className="text-white/60 text-[8px] absolute bottom-2 left-4 font-inter">
+        Tap for more details
+      </Text>
     </View>
   );
 }

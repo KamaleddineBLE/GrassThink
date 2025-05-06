@@ -1,14 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, Pressable, TouchableOpacity, Image } from 'react-native';
+import { View, Text, Pressable } from 'react-native';
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
   withTiming,
 } from 'react-native-reanimated';
-import fan from '../assets/fan.png'
-import tap from '../assets/tap.png'
-import roof from '../assets/roof.png'
-import lamp from '../assets/lamp.png'
+
 export default function ToggleButton() {
   const [mode, setMode] = useState('auto');
   const translateX = useSharedValue(6);
@@ -56,30 +53,7 @@ export default function ToggleButton() {
 
       {/* Extra visual black panel */}
       {mode === 'manual' && (
-        <View style={{gap:'5%'}} className="w-12 h-40 flex items-center pt-5  bg-black rounded-xl absolute top-4 left-6 -mt-1 z-0" >
-          <TouchableOpacity style={{backgroundColor:'#1E1E1E'}} className="w-6 h-6  rounded-full flex items-center justify-center ">
-             <Image source={lamp} className="w-3 h-4" />
-              
-              
-          </TouchableOpacity>
-          <TouchableOpacity style={{backgroundColor:'#1E1E1E'}} className="w-6 h-6  rounded-full flex items-center justify-center ">
-             <Image source={fan} className="w-3 h-3" />
-              
-              
-          </TouchableOpacity>
-          <TouchableOpacity style={{backgroundColor:'#1E1E1E'}} className="w-6 h-6  rounded-full flex items-center justify-center ">
-             <Image source={roof} className="w-3 h-4" />
-              
-              
-          </TouchableOpacity>
-          <TouchableOpacity style={{backgroundColor:'#1E1E1E'}} className="w-6 h-6  rounded-full flex items-center justify-center ">
-             <Image source={tap} className="w-3 h-4" />
-              
-              
-          </TouchableOpacity>
-          
-        </View>
-
+        <View className="w-11 h-32 bg-black rounded-xl absolute top-4 left-6 -mt-1 z-0" />
       )}
     </View>
   );
