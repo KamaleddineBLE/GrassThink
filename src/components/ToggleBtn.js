@@ -58,25 +58,28 @@ export default function ToggleButton() {
       {mode === 'manual' && (
         <View style={{gap:'5%'}} className="w-12 h-40 flex items-center pt-5  bg-black rounded-xl absolute top-4 left-6 -mt-1 z-0" >
           <TouchableOpacity style={{backgroundColor:'#1E1E1E'}} className="w-6 h-6  rounded-full flex items-center justify-center ">
-             <Image source={lamp} className="w-3 h-4" />
+             <Image source={lamp} style={{resizeMode:'contain'}}  className="w-3 h-4" />
               
               
           </TouchableOpacity>
           <TouchableOpacity style={{backgroundColor:'#1E1E1E'}} className="w-6 h-6  rounded-full flex items-center justify-center ">
-             <Image source={fan} className="w-3 h-3" />
+             <Image source={fan} className="w-3 h-3 opacity-40 " />
               
               
           </TouchableOpacity>
+
           <TouchableOpacity style={{backgroundColor:'#1E1E1E'}} className="w-6 h-6  rounded-full flex items-center justify-center ">
-             <Image source={roof} className="w-3 h-4" />
+             <Image source={tap} style={{resizeMode:'contain'}}className="w-3 h-4" />
               
               
           </TouchableOpacity>
+
           <TouchableOpacity style={{backgroundColor:'#1E1E1E'}} className="w-6 h-6  rounded-full flex items-center justify-center ">
-             <Image source={tap} className="w-3 h-4" />
+             <Image source={roof} style={{resizeMode:'contain'}} className="w-3.5 h-3 opacity-40" />
               
               
           </TouchableOpacity>
+          
           
         </View>
 

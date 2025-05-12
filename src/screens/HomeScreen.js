@@ -3,6 +3,11 @@ import { Ionicons, Feather } from '@expo/vector-icons';
 import { useState } from 'react';
 import avatar from '../assets/avatar.png';
 import GreenhouseCard from '../components/GreenHouseCard';
+import navHome from '../assets/ri_home-line.png';
+import navStat from '../assets/material-symbols_analytics-outline.png';
+import navNoti from '../assets/tdesign_notification-filled.png';
+import navSettings from '../assets/ri_settings-line.png';
+
 // import { useNavigation } from '@react-navigation/native';
 
 export default function HomeScreen() {
@@ -69,19 +74,19 @@ export default function HomeScreen() {
       {/* Bottom Navigation */}
       <View
         style={{ borderRadius: 20, alignSelf:'center'  }}
-        className="absolute w-4/5 bottom-6  mx-auto px-8 py-5 bg-black border-t flex-row justify-between items-center"
+        className="absolute w-4/5 bottom-6  mx-auto px-8 py-5 bg-black flex-row justify-between items-center"
       >
-        <TouchableOpacity>
-          <Ionicons name="home" size={24} color="white" />
+        <TouchableOpacity >
+          <Image  source={navHome} className="w-6 h-6 "/>
         </TouchableOpacity>
         <TouchableOpacity>
-          <Ionicons name="calendar-outline" size={24} color="white" />
+           <Image  source={navStat} className="w-6 h-6 opacity-50"/>  
         </TouchableOpacity>
         <TouchableOpacity>
-          <Ionicons name="notifications-outline" size={24} color="white" />
+            <Image  source={navNoti} className="w-6 h-6 opacity-50"/>  
         </TouchableOpacity>
         <TouchableOpacity>
-          <Ionicons name="camera-outline" size={24} color="white" />
+            <Image  source={navSettings} className="w-6 h-6 opacity-50"/>
         </TouchableOpacity>
       </View>
     </View>

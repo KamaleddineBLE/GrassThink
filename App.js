@@ -4,7 +4,7 @@ import { StatusBar } from 'expo-status-bar';
 import { useFonts } from 'expo-font';
 
 import HomeScreen from './src/screens/HomeScreen';
-
+import GreenHouseScreen from './src/screens/GreenHouseScreen';
 import {
   Inter_100Thin,
   Inter_200ExtraLight,
