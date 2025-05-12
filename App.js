@@ -22,6 +22,8 @@ import {
   Inter_900Black,
 } from "@expo-google-fonts/inter";
 
+
+
 // Prevent splash screen from auto-hiding
 const Stack = createStackNavigator();
 

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useMemo } from "react";
 import {
   View,
   Text,
@@ -13,100 +13,117 @@ import {
   FlatList,
 } from "react-native";
 import { Picker } from "@react-native-picker/picker";
-import { LinearGradient } from "expo-linear-gradient";
 import { LineChart } from "react-native-gifted-charts";
 import { Ionicons } from "@expo/vector-icons";
-
-// Assuming you have a data file with greenhouse data
+import {
+  getDatabase,
+  ref,
+  query,
+  orderByChild,
+  startAt,
+  get,
+  onValue,
+} from "firebase/database";
+import { database } from "../services/firebase";
 import { chunkArray, greenhouses, sensorData } from "../constants/data";
-import axios from "axios";
-import SensorCard from "../components/Indicator";
+import SensorCardParams from "../components/SensorCardParams";
 
 const HistoricalDataScreen = ({ route, navigation }) => {
   const { paramType, paramName, fieldName } = route.params;
+
   const chunkedSensors = chunkArray(sensorData, 3);
+  const [selectedParam, setSelectedParam] = useState(paramName);
 
   const [selectedGH, setSelectedGH] = useState(() => {
-    if (fieldName === "Amizour Field") {
-      return "sensor1"; // Default to sensor1, you can change this logic if needed
-    }
-    if (fieldName === "Mountain View") {
-      return "sensor2";
-    }
-    return null;
+    if (fieldName === "Amizour Field") return "sensor1";
+    if (fieldName === "Mountain View") return "sensor2";
+    return "sensor1";
   });
-  const [timeRange, setTimeRange] = useState("week"); // day, week, month, year
+  const [timeRange, setTimeRange] = useState("week");
   const [isLoading, setIsLoading] = useState(true);
+  // rawData now holds both sensors keyed by ID
+  const [rawData, setRawData] = useState({ sensor1: [], sensor2: [] });
   const [chartData, setChartData] = useState([]);
   const [stats, setStats] = useState({ min: 0, max: 0, avg: 0, current: 0 });
-  const [paramsName, setParamsName] = useState(paramName);
-  const [paramsType, setParamsType] = useState(paramType);
   const pickerRef = useRef();
 
-  function open() {
-    pickerRef.current.focus();
-  }
-
-  function close() {
-    pickerRef.current.blur();
-  }
+  const timeRangeMap = useMemo(
+    () => ({
+      day: 24 * 60 * 60 * 1000,
+      week: 7 * 24 * 60 * 60 * 1000,
+      month: 30 * 24 * 60 * 60 * 1000,
+      year: 365 * 24 * 60 * 60 * 1000,
+    }),
+    []
+  );
 
   const aggregateDataForScreen = (data, maxPoints) => {
-    const totalPoints = data.length;
-    if (totalPoints <= maxPoints) return data;
-
-    const bucketSize = Math.ceil(totalPoints / maxPoints);
+    if (data.length <= maxPoints) return data;
+    const bucketSize = Math.ceil(data.length / maxPoints);
     const aggregated = [];
-
-    for (let i = 0; i < totalPoints; i += bucketSize) {
+    for (let i = 0; i < data.length; i += bucketSize) {
       const slice = data.slice(i, i + bucketSize);
-      const avg =
-        slice.reduce((sum, item) => sum + item.value, 0) / slice.length;
+      const avg = slice.reduce((sum, d) => sum + d.value, 0) / slice.length;
       const label = slice[Math.floor(slice.length / 2)].label;
-
       aggregated.push({
         value: parseFloat(avg.toFixed(1)),
         label,
         dataPointText: label,
       });
     }
-
     return aggregated;
   };
 
-  // API endpoint for sensor data
-  const API_BASE_URL = "http://192.168.45.158:5000/api";
-  // const API_BASE_URL = "http://192.168.1.10:5000/api";
-
-  // Fetch sensor data from the database based on selected parameters
   const fetchSensorData = async () => {
+    setIsLoading(true);
     try {
-      setIsLoading(true);
+      const cutoffTime = Date.now() - timeRangeMap[timeRange];
+      console.log("cutoffTime:", new Date(cutoffTime).toISOString());
 
-      // Format the API endpoint based on selections
-      const endpoint = `${API_BASE_URL}/sensor-data/${encodeURIComponent(
-        selectedGH
-      )}?timeRange=${encodeURIComponent(
-        timeRange
-      )}&paramName=${encodeURIComponent(
-        paramsName
-      )}&paramType=${encodeURIComponent(paramType)}`;
+      const sensorIds = ["sensor1", "sensor2"];
+      const fetched = {};
 
-      console.log("Fetching data from:", endpoint); // Debugging line
-      const response = await axios.get(endpoint);
+      // Parallel fetch
+      await Promise.all(
+        sensorIds.map(async (id) => {
+          const sensorRef = ref(database, id);
+          const dataQuery = query(
+            sensorRef,
+            orderByChild("timestamp"),
+            startAt(cutoffTime)
+          );
+          const snapshot = await get(dataQuery);
+          // console.log("Fetched data for", id, snapshot.val());
 
-      const responseData = await response.data;
+          if (snapshot.exists()) {
+            fetched[id] = [];
+            snapshot.forEach((childSnapshot) => {
+              const data = childSnapshot.val();
+              // console.log("Data item:", data);
+              fetched[id].push({
+                ...data,
+                timestamp: new Date(data.timestamp).toISOString(),
+              });
+            });
 
-      // Process the data for chart display
-      processChartData(responseData.data, responseData.stats);
-    } catch (error) {
-      console.error("Error fetching sensor data:", error);
-      Alert.alert(
-        "Data Error",
-        "Failed to fetch sensor data. Please try again later.",
-        [{ text: "OK" }]
+            // Sort by timestamp
+            fetched[id].sort((a, b) => a.timestamp - b.timestamp);
+          } else {
+            console.log("No data available for", id);
+            fetched[id] = [];
+          }
+        })
       );
 
+      // now both sensor1 and sensor2 are in fetched
+      // console.log("All fetched data:", fetched);
+
+      setRawData(fetched);
+      processChartData(fetched[selectedGH]);
+    } catch (error) {
+      console.error(error);
+      Alert.alert("Data Error", "Failed to fetch sensor data.");
+      setRawData({ sensor1: [], sensor2: [] });
       setChartData([]);
       setStats({ min: 0, max: 0, avg: 0, current: 0 });
     } finally {
@@ -115,25 +132,29 @@ const HistoricalDataScreen = ({ route, navigation }) => {
   };
 
   // Process the raw data into chart format and calculate statistics
-  const processChartData = (rawData, apiStats) => {
+  const processChartData = (data) => {
+    if (!data || data.length === 0) {
+      setChartData([]);
+      setStats({ min: 0, max: 0, avg: 0, current: 0 });
+      return;
+    }
+
     let aggregatedData = [];
 
-    // Set max number of points based on screen width (e.g., 50pts for 400px)
+    // Set max number of points based on screen width
     const screenWidth = Dimensions.get("window").width;
-    console.log("Screen width:", screenWidth); // Debugging line
-    const maxDisplayPoints = Math.floor(screenWidth / 60); // e.g., 8px per point
-    console.log("Max display points:", maxDisplayPoints); // Debugging line
+    const maxDisplayPoints = Math.floor(screenWidth / 60);
 
     if (timeRange === "day") {
       // Hourly aggregation
       const hourlyData = {};
-      rawData.forEach((item) => {
+      data.forEach((item) => {
         const date = new Date(item.timestamp);
         const hour = date.getHours();
         if (!hourlyData[hour]) {
           hourlyData[hour] = { sum: 0, count: 0 };
         }
-        hourlyData[hour].sum += parseFloat(item[paramName]);
+        hourlyData[hour].sum += parseFloat(item[paramName] || 0);
         hourlyData[hour].count += 1;
       });
 
@@ -147,14 +168,14 @@ const HistoricalDataScreen = ({ route, navigation }) => {
     } else if (timeRange === "week") {
       // Daily aggregation
       const dailyData = {};
-      rawData.forEach((item) => {
+      data.forEach((item) => {
         const date = new Date(item.timestamp);
         const day = date.toISOString().split("T")[0];
 
         if (!dailyData[day]) {
           dailyData[day] = { sum: 0, count: 0 };
         }
-        dailyData[day].sum += parseFloat(item[paramName]);
+        dailyData[day].sum += parseFloat(item[paramName] || 0);
         dailyData[day].count += 1;
       });
 
@@ -166,17 +187,90 @@ const HistoricalDataScreen = ({ route, navigation }) => {
         dataPointText: new Date(day).toLocaleDateString("en-GB", {
           day: "2-digit",
           month: "short",
-          year: "numeric",
         }),
       }));
-    } else {
-      // Use raw data
-      aggregatedData = rawData.map((item) => ({
-        value: parseFloat(item[paramName]),
-        label: formatLabel(item.timestamp, timeRange),
-        dataPointText: formatLabel(item.timestamp, timeRange),
-      }));
+    } else if (timeRange === "month") {
+      // Weekly aggregation
+      const weeklyData = {};
+      data.forEach((item) => {
+        const date = new Date(item.timestamp);
+        // Get week number within the month
+        const weekNum = Math.floor(date.getDate() / 7);
+        const weekKey = `${date.getFullYear()}-${date.getMonth()}-${weekNum}`;
+
+        if (!weeklyData[weekKey]) {
+          weeklyData[weekKey] = { sum: 0, count: 0 };
+        }
+        weeklyData[weekKey].sum += parseFloat(item[paramName] || 0);
+        weeklyData[weekKey].count += 1;
+      });
+
+      aggregatedData = Object.keys(weeklyData).map((weekKey) => {
+        const [year, month, week] = weekKey.split("-").map(Number);
+        const weekLabel = `W${week + 1}`;
+
+        return {
+          value: parseFloat(
+            (weeklyData[weekKey].sum / weeklyData[weekKey].count).toFixed(1)
+          ),
+          label: weekLabel,
+          dataPointText: `${weekLabel} ${new Date(
+            year,
+            month
+          ).toLocaleDateString("en-GB", { month: "short" })}`,
+        };
+      });
+    } else if (timeRange === "year") {
+      // Monthly aggregation
+      const monthlyData = {};
+      data.forEach((item) => {
+        const date = new Date(item.timestamp);
+        const monthKey = `${date.getFullYear()}-${date.getMonth()}`;
+
+        if (!monthlyData[monthKey]) {
+          monthlyData[monthKey] = { sum: 0, count: 0 };
+        }
+        monthlyData[monthKey].sum += parseFloat(item[paramName] || 0);
+        monthlyData[monthKey].count += 1;
+      });
+
+      const months = [
+        "Jan",
+        "Feb",
+        "Mar",
+        "Apr",
+        "May",
+        "Jun",
+        "Jul",
+        "Aug",
+        "Sep",
+        "Oct",
+        "Nov",
+        "Dec",
+      ];
+
+      aggregatedData = Object.keys(monthlyData).map((monthKey) => {
+        const [year, month] = monthKey.split("-").map(Number);
+
+        return {
+          value: parseFloat(
+            (monthlyData[monthKey].sum / monthlyData[monthKey].count).toFixed(1)
+          ),
+          label: months[month],
+          dataPointText: `${months[month]} ${year}`,
+        };
+      });
     }
+
+    // Sort by timestamp to ensure proper order
+    aggregatedData.sort((a, b) => {
+      // If we're sorting by day label (numeric)
+      if (!isNaN(a.label) && !isNaN(b.label)) {
+        return parseInt(a.label) - parseInt(b.label);
+      }
+      // Otherwise keep original order (already sorted by keys)
+      return 0;
+    });
 
     // Apply adaptive aggregation
     const displayData = aggregateDataForScreen(
@@ -185,18 +279,8 @@ const HistoricalDataScreen = ({ route, navigation }) => {
     );
     setChartData(displayData);
 
-    console.log("Aggregated data:", displayData); // Debugging line
-
-    // Use pre-calculated stats from API if available, otherwise calculate locally
-    if (apiStats && Object.keys(apiStats).length > 0) {
-      setStats({
-        min: parseFloat(apiStats.min.toFixed(1)),
-        max: parseFloat(apiStats.max.toFixed(1)),
-        avg: parseFloat(apiStats.avg.toFixed(1)),
-        current: parseFloat(apiStats.current.toFixed(1)),
-      });
-    } else if (aggregatedData.length > 0) {
-      // Fallback to local calculation if API doesn't provide stats
+    // Calculate statistics
+    if (aggregatedData.length > 0) {
       const values = aggregatedData.map((item) => item.value);
       const min = Math.min(...values);
       const max = Math.max(...values);
@@ -211,43 +295,37 @@ const HistoricalDataScreen = ({ route, navigation }) => {
     }
   };
 
-  // Format timestamp based on selected time range
-  const formatLabel = (timestamp, range) => {
-    const date = new Date(timestamp);
-
-    switch (range) {
-      case "day":
-        return date.getHours() + ":00";
-      case "week":
-        const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-        return days[date.getDay()];
-      case "month":
-        return `${date.getDate()}/${date.getMonth() + 1}`;
-      case "year":
-        const months = [
-          "Jan",
-          "Feb",
-          "Mar",
-          "Apr",
-          "May",
-          "Jun",
-          "Jul",
-          "Aug",
-          "Sep",
-          "Oct",
-          "Nov",
-          "Dec",
-        ];
-        return months[date.getMonth()];
-      default:
-        return "";
+  // Re-process when changing selection or time range or param
+  useEffect(() => {
+    if (rawData[selectedGH]) {
+      processChartData(rawData[selectedGH]);
     }
-  };
+  }, [selectedGH, timeRange, selectedParam]);
 
-  // Fetch data when parameters change
+  // Initial fetch once
   useEffect(() => {
     fetchSensorData();
-  }, [selectedGH, timeRange, paramName]);
+
+    // Set up real-time listener for new data
+    const sensorRef = ref(database, `${selectedGH}`);
+    const unsubscribe = onValue(sensorRef, (snapshot) => {
+      // This will trigger when data changes in Firebase
+      // We could update the chart in real-time, but for now let's just
+      // log it to keep the app's performance optimal
+      console.log("New data available in Firebase");
+
+      // To auto-refresh, uncomment the line below
+      // fetchSensorData();
+    });
+
+    // Clean up the listener when the component unmounts
+    return () => unsubscribe();
+  }, []);
+
+  const ParameterPress = (param) => {
+    setSelectedParam(param);
+    console.log("Selected parameter:", param);
+  };
 
   // Get the appropriate unit for the selected parameter
   const getUnit = () => {
@@ -499,10 +577,8 @@ const HistoricalDataScreen = ({ route, navigation }) => {
           pagingEnabled
           nestedScrollEnabled={true}
           style={{
-            // position: "absolute",
-            // bottom: "12%",
             maxHeight: 120,
-            width: "full",
+            width: "100%",
           }}
           renderItem={({ item }) => (
             <View
@@ -515,13 +591,14 @@ const HistoricalDataScreen = ({ route, navigation }) => {
               }}
             >
               {item.map((sensor, i) => (
-                <SensorCard
+                <SensorCardParams
                   key={`${sensor.label}-${i}`}
                   value={sensor.value}
                   unit={sensor.unit}
                   label={sensor.label}
                   type="environment"
                   fieldName={fieldName}
+                  handlePress={ParameterPress}
                 />
               ))}
             </View>

@@ -70,20 +70,6 @@ const OptimizationScreen = ({ navigation }) => {
       </View>
 
       {/* Bottom Tab Bar */}
-      <View style={styles.tabBar}>
-        <TouchableOpacity style={styles.tabItem}>
-          <Ionicons name="home-outline" size={24} color="#000" />
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.tabItem}>
-          <Ionicons name="grid-outline" size={24} color="#000" />
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.tabItem}>
-          <Ionicons name="notifications-outline" size={24} color="#000" />
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.tabItem}>
-          <Ionicons name="settings-outline" size={24} color="#000" />
-        </TouchableOpacity>
-      </View>
     </SafeAreaView>
   );
 };

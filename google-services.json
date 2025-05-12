@@ -1,0 +1,30 @@
+{
+  "project_info": {
+    "project_number": "490684987542",
+    "firebase_url": "https://grassthink-47000-default-rtdb.firebaseio.com",
+    "project_id": "grassthink-47000",
+    "storage_bucket": "grassthink-47000.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:490684987542:android:9534f07b0bcfb425c6aab7",
+        "android_client_info": {
+          "package_name": "com.estin.grassthink"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyB0vtAOg7smBRqS2pcwV8mK8vmiKIZ2Ito"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

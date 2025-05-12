@@ -12,70 +12,87 @@ import {
 import { Ionicons, Feather } from "@expo/vector-icons";
 import avatar from "../assets/avatar.png";
 import GreenhouseCard from "../components/GreenHouseCard";
-import axios from "axios";
-import images from "../constants/images";
 import { greenhouses } from "../constants/data";
 import { useNavigation } from "@react-navigation/native";
+import {
+  ref,
+  onValue,
+  off,
+  query,
+  orderByChild,
+  limitToLast,
+} from "firebase/database";
+import { database } from "../services/firebase";
 
 export default function HomeScreen() {
   const navigation = useNavigation();
   const [sensorData, setSensorData] = useState({});
-  const [mode, setMode] = useState("Auto");
-  const { width } = Dimensions.get("window");
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(true);
   const [selectedTab, setSelectedTab] = useState("home");
-
+  const { width } = Dimensions.get("window");
   const cardWidth = width * 0.93;
   const spacing = 16;
-  // Fetch the latest sensor data for a given sensor ID
-  const fetchLatestSensorData = async (sensorId) => {
-    try {
-      const url = `http://192.168.45.158:5000/api/sensor-data-latest/${sensorId}`;
-      // const url = `http://192.168.1.10:5000/api/sensor-data-latest/${sensorId}`;
-      console.log("Fetching data from:", url);
-
-      const response = await axios.get(url);
-      // console.log("Sensor data:", response.data.data);
-      return response.data.data;
-    } catch (err) {
-      console.error(`Error fetching data for ${sensorId}:`, err);
-      setError("Failed to load sensor data");
-      return null;
-    }
-  };
 
   useEffect(() => {
-    const fetchAllSensorData = async () => {
-      setLoading(true);
-      try {
-        const promises = greenhouses.map((gh) =>
-          fetchLatestSensorData(`sensor${gh.id}`)
+    let isMounted = true;
+    const listeners = [];
+
+    const setupListeners = () => {
+      greenhouses.forEach((gh) => {
+        const key = `sensor${gh.id}`;
+
+        // Create a query: order by timestamp and limit to last entry
+        const sensorQuery = query(
+          ref(database, key),
+          orderByChild("timestamp"),
+          limitToLast(1)
         );
-        const results = await Promise.all(promises);
-        const dataMap = {};
-        greenhouses.forEach((gh, idx) => {
-          dataMap[gh.id] = results[idx];
-        });
-        setSensorData(dataMap);
-      } catch (err) {
-        console.error(err);
-        setError("Failed to load sensor data");
-      } finally {
-        setLoading(false);
-      }
+
+        const listener = onValue(
+          sensorQuery,
+          (snapshot) => {
+            let latestData = null;
+
+            // Iterate through snapshot (even if there's only 1 child)
+            snapshot.forEach((childSnapshot) => {
+              latestData = childSnapshot.val();
+            });
+
+            if (isMounted) {
+              setSensorData((prev) => ({
+                ...prev,
+                [gh.id]: latestData ?? {},
+              }));
+              setLoading(false);
+            }
+          },
+          (err) => {
+            console.error(`Realtime error for ${key}:`, err);
+            setError("Failed to load sensor data");
+            setLoading(false);
+          }
+        );
+
+        listeners.push({ queryRef: sensorQuery, listener });
+      });
     };
 
-    fetchAllSensorData();
-    const interval = setInterval(fetchAllSensorData, 30000);
-    return () => clearInterval(interval);
+    setupListeners();
+
+    return () => {
+      isMounted = false;
+      listeners.forEach(({ queryRef, listener }) => {
+        off(queryRef, "value", listener);
+      });
+    };
   }, []);
 
   const onPressNavigationTab = (tab) => {
     setSelectedTab(tab);
     navigation.navigate(tab.charAt(0).toUpperCase() + tab.slice(1));
   };
-  // console.log("Sensor Data:", sensorData);
+
   return (
     <View className="flex-1 bg-white ">
       {/* Header */}
@@ -102,11 +119,11 @@ export default function HomeScreen() {
           Greenhouses
         </Text>
         <Text className="text-gray-400 text-xs mt-4 ml-1 font-normal">
-          2 Added
+          {greenhouses.length} Added
         </Text>
       </View>
       {loading ? (
-        <ActivityIndicator size="small" color="#fff" />
+        <ActivityIndicator size="small" color="#000" />
       ) : (
         <ScrollView showsVerticalScrollIndicator={false}>
           <FlatList
@@ -119,18 +136,12 @@ export default function HomeScreen() {
             contentContainerStyle={{
               paddingHorizontal: (width - cardWidth) / 2,
             }}
-            renderItem={({ item, index }) => (
+            renderItem={({ item }) => (
               <View style={{ width: cardWidth, marginRight: spacing }}>
-                <GreenhouseCard
-                  name={item.name}
-                  data={sensorData[item.id]}
-
-                  // onPress={() => navigation.navigate('Details', { id: index + 1 })}
-                />
+                <GreenhouseCard name={item.name} data={sensorData[item.id]} />
               </View>
             )}
           />
-
           <View className="h-24" />
         </ScrollView>
       )}
@@ -148,13 +159,10 @@ export default function HomeScreen() {
         <TouchableOpacity>
           <Ionicons name="notifications-outline" size={24} color="white" />
         </TouchableOpacity>
-        <TouchableOpacity>
-          <Ionicons
-            name="camera-outline"
-            onPress={() => onPressNavigationTab("CameraInsights")}
-            size={24}
-            color="white"
-          />
+        <TouchableOpacity
+          onPress={() => onPressNavigationTab("CameraInsights")}
+        >
+          <Ionicons name="camera-outline" size={24} color="white" />
         </TouchableOpacity>
       </View>
     </View>
