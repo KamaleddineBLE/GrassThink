@@ -1,274 +1,248 @@
-// server.js - Main Express server file with multi-sensor endpoint
+// server.js - Firebase version using Realtime Database
 const express = require("express");
-const mysql = require("mysql2/promise");
+const admin = require("firebase-admin");
 const cors = require("cors");
 const path = require("path");
+const multer = require("multer");
+const ort = require("onnxruntime-node");
+const sharp = require("sharp");
 require("dotenv").config();
 
 const app = express();
 const PORT = process.env.PORT || 5000;
+const upload = multer({ storage: multer.memoryStorage() });
+let session;
 
-// Middleware
+// Load the ONNX model once at startup
+ort.InferenceSession.create(path.join(__dirname, "models", "best.onnx"))
+  .then((s) => {
+    session = s;
+  })
+  .catch(console.error);
+
 app.use(cors());
 app.use(express.json());
 
-// Database configuration
-const dbConfig = {
-  host: process.env.DB_HOST || "localhost",
-  user: process.env.DB_USER || "root",
-  password: process.env.DB_PASSWORD || "1234",
-  database: process.env.DB_NAME || "greenhouse_data",
+// Firebase Admin Initialization
+const serviceAccount = require("../grassthink-47000-firebase-adminsdk-fbsvc-1a39f3a722.json");
+
+let firebaseConfig;
+if (process.env.FIREBASE_CONFIG) {
+  firebaseConfig = JSON.parse(process.env.FIREBASE_CONFIG);
+  console.log("Using Firebase config from environment variable");
+} else {
+  firebaseConfig = require("../grassthink-47000-firebase-adminsdk-fbsvc-1a39f3a722.json");
+}
+
+admin.initializeApp({
+  credential: admin.credential.cert(firebaseConfig),
+  databaseURL:
+    process.env.FIREBASE_DATABASE_URL ||
+    "https://grassthink-47000-default-rtdb.firebaseio.com",
+});
+const db = admin.database();
+
+// Helper: Get sensor reference
+const getSensorRef = (sensorId) => {
+  if (sensorId !== "sensor1" && sensorId !== "sensor2") return null;
+  return db.ref(sensorId);
 };
 
-// Create MySQL pool for connection management
-const pool = mysql.createPool(dbConfig);
-
-// Existing endpoints...
-app.get("/api/sensor-data-simple/:sensorId", async (req, res) => {
-  const { sensorId } = req.params;
-
-  // Validate sensor ID
-  if (sensorId !== "sensor1" && sensorId !== "sensor2") {
-    return res
-      .status(400)
-      .json({ error: "Invalid sensor ID. Use sensor1 or sensor2." });
-  }
-
+app.post("/api/classify", upload.single("leaf"), async (req, res) => {
   try {
-    const [rows] = await pool.query(
-      `SELECT * FROM ${sensorId} ORDER BY timestamp DESC LIMIT 100`
-    );
-    res.json({ data: rows, sensorId });
-  } catch (error) {
-    console.error("Error fetching simple sensor data:", error);
-    res.status(500).json({
-      error: "Failed to fetch simple sensor data",
-      details: error.message,
+    // 1. Preprocess buffer → 640×640 RGB tensor
+    const imgBuffer = await sharp(req.file.buffer)
+      .resize(640, 640)
+      .raw()
+      .toBuffer(); // returns H×W×C uint8
+
+    // Normalize to [0,1] float32
+    const floatData = Float32Array.from(imgBuffer, (v) => v / 255.0);
+
+    // HWC → CHW
+    const numPixels = 640 * 640;
+    const chwData = new Float32Array(3 * numPixels);
+    for (let i = 0; i < numPixels; i++) {
+      chwData[i] = floatData[i * 3 + 0]; // R
+      chwData[i + numPixels] = floatData[i * 3 + 1]; // G
+      chwData[i + 2 * numPixels] = floatData[i * 3 + 2]; // B
+    }
+
+    const inputTensor = new ort.Tensor("float32", chwData, [1, 3, 640, 640]);
+    console.log("Input tensor dims:", inputTensor.dims);
+
+    // 2. Prepare feeds using actual model input name
+    const inputName = session.inputNames[0];
+    const feeds = { [inputName]: inputTensor };
+
+    // 3. Run inference
+    const outputMap = await session.run(feeds);
+
+    // 4. Grab logits using actual output name
+    const outputName = session.outputNames[0];
+    const logits = outputMap[outputName].data;
+
+    // 5. Argmax → class
+    const classes = ["-K", "-N", "-P", "FN"];
+    let maxIdx = 0,
+      maxVal = -Infinity;
+    logits.forEach((v, i) => {
+      if (v > maxVal) {
+        maxVal = v;
+        maxIdx = i;
+      }
     });
+
+    const predicted = classes[maxIdx];
+    const confidence = maxVal;
+    console.log(`Predicted: ${predicted} (conf=${confidence.toFixed(4)})`);
+
+    return res.json({ class: predicted, confidence });
+  } catch (err) {
+    console.error("Classification error:", err);
+    return res.status(500).json({ error: err.message });
   }
 });
 
+// GET filtered sensor data
 app.get("/api/sensor-data/:sensorId", async (req, res) => {
   const { sensorId } = req.params;
   const {
-    timeRange = "week", // "day" | "week" | "month" | "year"
+    timeRange = "week",
     paramName,
     paramType = "environment",
   } = req.query;
 
-  // ✅ Validate sensorId
-  const validSensors = ["sensor1", "sensor2"];
-  if (!validSensors.includes(sensorId.toLowerCase())) {
-    return res.status(400).json({
-      error: "Invalid sensor ID. Use sensor1 or sensor2.",
-    });
-  }
+  const sensorRef = getSensorRef(sensorId);
+  if (!sensorRef) return res.status(400).json({ error: "Invalid sensor ID" });
 
-  // ✅ Determine exact time range in hours/days
   const rangeMap = {
-    day: "INTERVAL 1 DAY",
-    week: "INTERVAL 7 DAY",
-    month: "INTERVAL 30 DAY", // could use LAST_DAY() for calendar month logic if needed
-    year: "INTERVAL 365 DAY",
+    day: 24 * 60 * 60 * 1000,
+    week: 7 * 24 * 60 * 60 * 1000,
+    month: 30 * 24 * 60 * 60 * 1000,
+    year: 365 * 24 * 60 * 60 * 1000,
   };
 
-  const interval = rangeMap[timeRange] || rangeMap["week"];
-  const tableName = sensorId.toLowerCase();
-
-  // ✅ Build SQL filter
-  const timeFilterSql = `
-    timestamp >= DATE_SUB(
-      (SELECT MAX(timestamp) FROM \`${tableName}\`),
-      ${interval}
-    )
-  `;
-
-  // ✅ Validate parameter
-  const paramsByType = {
-    environment: [
-      "humidity",
-      "temperature",
-      "dht_humidity",
-      "dht_temperature",
-      "soil",
-    ],
-    nutrients: ["nitrogen", "phosphorus", "potassium", "conductivity", "ph"],
-  };
-  let columns = "*";
-  if (paramName) {
-    const validParams = paramsByType[paramType] || [];
-    if (!validParams.includes(paramName)) {
-      return res.status(400).json({
-        error: `Invalid parameter "${paramName}" for type "${paramType}".`,
-      });
-    }
-    columns = `id, timestamp, sensor_id, ${paramName}`;
-  }
+  const duration = rangeMap[timeRange] || rangeMap.week;
+  const now = Date.now();
+  const cutoff = now - duration;
 
   try {
-    const sql = `
-      SELECT ${columns}
-      FROM \`${tableName}\`
-      WHERE ${timeFilterSql}
-      ORDER BY timestamp ASC
-    `;
-    const [rows] = await pool.query(sql);
+    // Query data from the specified time range
+    const snapshot = await sensorRef
+      .orderByChild("timestamp")
+      .startAt(cutoff)
+      .once("value");
 
-    if (!rows.length) {
-      return res.status(404).json({
-        error: "No data found for the given filters",
-        executedSql: sql.trim(),
-        timeRange,
-        paramName: paramName || null,
-        paramType,
-        sensorId,
-      });
-    }
+    const rows = [];
+    snapshot.forEach((childSnapshot) => {
+      rows.push(childSnapshot.val());
+    });
 
-    // ✅ Stats if param is specified
+    // Sort by timestamp ascending
+    rows.sort((a, b) => a.timestamp - b.timestamp);
+
     let stats = { min: 0, max: 0, avg: 0, current: 0 };
-    if (paramName) {
+
+    if (paramName && rows.length > 0) {
       const vals = rows
         .map((r) => parseFloat(r[paramName]))
         .filter((v) => !isNaN(v));
+
       if (vals.length) {
         stats = {
           min: Math.min(...vals),
           max: Math.max(...vals),
-          avg: vals.reduce((s, v) => s + v, 0) / vals.length,
+          avg: vals.reduce((a, b) => a + b, 0) / vals.length,
           current: vals[vals.length - 1],
         };
       }
     }
 
-    res.json({
-      data: rows,
-      stats,
-      timeRange,
-      paramName: paramName || null,
-      paramType,
-      sensorId,
-    });
+    res.json({ data: rows, stats, timeRange, paramName, paramType, sensorId });
   } catch (err) {
-    console.error("Error fetching sensor data:", err);
-    res.status(500).json({
-      error: "Database error",
-      details: err.message,
-    });
+    console.error(err);
+    res
+      .status(500)
+      .json({ error: "Database query failed", details: err.message });
   }
 });
 
-// GET /api/sensor-data-latest/:sensorId
+// GET latest sensor data
 app.get("/api/sensor-data-latest/:sensorId", async (req, res) => {
   const { sensorId } = req.params;
-  const validSensors = ["sensor1", "sensor2"];
-
-  console.log("Fetching latest data for sensor:", sensorId);
-
-  if (!validSensors.includes(sensorId.toLowerCase())) {
-    return res.status(400).json({ error: "Invalid sensor ID." });
-  }
+  const sensorRef = getSensorRef(sensorId);
+  if (!sensorRef) return res.status(400).json({ error: "Invalid sensor ID" });
 
   try {
-    const table = sensorId.toLowerCase();
-    const sql = `
-      SELECT *
-      FROM \`${table}\`
-      ORDER BY \`timestamp\` DESC
-      LIMIT 1
-    `;
-    const [rows] = await pool.query(sql);
-    if (rows.length === 0) {
-      return res.json({ data: null });
-    }
-    res.json({ data: rows[0] });
-    console.log("Latest data:", rows[0]);
+    const snapshot = await sensorRef
+      .orderByChild("timestamp")
+      .limitToLast(1)
+      .once("value");
+
+    if (snapshot.numChildren() === 0) return res.json({ data: null });
+
+    let data = null;
+    snapshot.forEach((childSnapshot) => {
+      data = childSnapshot.val();
+    });
+
+    res.json({ data });
   } catch (err) {
-    console.error("Error fetching latest sensor data:", err);
+    console.error(err);
     res.status(500).json({ error: err.message });
   }
 });
 
-// NEW ENDPOINT: Get data for multiple sensors at once
+// Multi-sensor query
 app.get("/api/multi-sensor-data", async (req, res) => {
   const {
-    timeRange = "week", // "day" | "week" | "month" | "year"
+    timeRange = "week",
     paramName,
     paramType = "environment",
-    sensorIds = "sensor1,sensor2", // Default to both sensors, comma-separated
+    sensorIds = "sensor1,sensor2",
   } = req.query;
 
-  // ✅ Validate sensor IDs
   const validSensors = ["sensor1", "sensor2"];
   const requestedSensors = sensorIds
     .split(",")
-    .filter((id) => validSensors.includes(id.trim().toLowerCase()));
+    .map((s) => s.trim())
+    .filter((s) => validSensors.includes(s));
 
-  if (requestedSensors.length === 0) {
-    return res.status(400).json({
-      error: "No valid sensor IDs provided. Use sensor1 or sensor2.",
-    });
+  if (!requestedSensors.length) {
+    return res.status(400).json({ error: "No valid sensor IDs" });
   }
 
-  // ✅ Determine exact time range in hours/days
   const rangeMap = {
-    day: "INTERVAL 1 DAY",
-    week: "INTERVAL 7 DAY",
-    month: "INTERVAL 30 DAY",
-    year: "INTERVAL 365 DAY",
+    day: 24 * 60 * 60 * 1000,
+    week: 7 * 24 * 60 * 60 * 1000,
+    month: 30 * 24 * 60 * 60 * 1000,
+    year: 365 * 24 * 60 * 60 * 1000,
   };
 
-  const interval = rangeMap[timeRange] || rangeMap["week"];
+  const duration = rangeMap[timeRange] || rangeMap.week;
+  const cutoff = Date.now() - duration;
 
-  // ✅ Validate parameter
-  const paramsByType = {
-    environment: [
-      "humidity",
-      "temperature",
-      "dht_humidity",
-      "dht_temperature",
-      "soil",
-    ],
-    nutrients: ["nitrogen", "phosphorus", "potassium", "conductivity", "ph"],
-  };
-
-  let columns = "*";
-  if (paramName) {
-    const validParams = paramsByType[paramType] || [];
-    if (!validParams.includes(paramName)) {
-      return res.status(400).json({
-        error: `Invalid parameter "${paramName}" for type "${paramType}".`,
-      });
-    }
-    columns = `id, timestamp, sensor_id, ${paramName}`;
-  }
+  const results = {};
 
   try {
-    // Process each sensor and collect results
-    const results = {};
-
     for (const sensorId of requestedSensors) {
-      const tableName = sensorId.toLowerCase();
+      const sensorRef = getSensorRef(sensorId);
+      const snapshot = await sensorRef
+        .orderByChild("timestamp")
+        .startAt(cutoff)
+        .once("value");
 
-      // Build SQL filter for this sensor
-      const timeFilterSql = `
-        timestamp >= DATE_SUB(
-          (SELECT MAX(timestamp) FROM \`${tableName}\`),
-          ${interval}
-        )
-      `;
+      const rows = [];
+      snapshot.forEach((childSnapshot) => {
+        rows.push(childSnapshot.val());
+      });
 
-      const sql = `
-        SELECT ${columns}
-        FROM \`${tableName}\`
-        WHERE ${timeFilterSql}
-        ORDER BY timestamp ASC
-      `;
+      // Sort by timestamp ascending
+      rows.sort((a, b) => a.timestamp - b.timestamp);
 
-      const [rows] = await pool.query(sql);
-
-      // Calculate stats if a parameter is specified
       let stats = { min: 0, max: 0, avg: 0, current: 0 };
+
       if (paramName && rows.length > 0) {
         const vals = rows
           .map((r) => parseFloat(r[paramName]))
@@ -284,54 +258,30 @@ app.get("/api/multi-sensor-data", async (req, res) => {
         }
       }
 
-      // Store results for this sensor
-      results[sensorId] = {
-        data: rows,
-        stats,
-      };
-    }
-
-    // Check if we have any data
-    const noData = Object.values(results).every(
-      (result) => result.data.length === 0
-    );
-
-    if (noData) {
-      return res.status(404).json({
-        error: "No data found for any sensors with the given filters",
-        timeRange,
-        paramName: paramName || null,
-        paramType,
-        sensorIds: requestedSensors,
-      });
+      results[sensorId] = { data: rows, stats };
     }
 
     res.json({
       results,
       timeRange,
-      paramName: paramName || null,
+      paramName,
       paramType,
       sensorIds: requestedSensors,
     });
   } catch (err) {
-    console.error("Error fetching multi-sensor data:", err);
-    res.status(500).json({
-      error: "Database error",
-      details: err.message,
-    });
+    console.error(err);
+    res.status(500).json({ error: "Database error", details: err.message });
   }
 });
 
-// Serve static files in production
+// Serve static frontend
 if (process.env.NODE_ENV === "production") {
   app.use(express.static(path.join(__dirname, "client/build")));
-
-  app.get("*", (req, res) => {
-    res.sendFile(path.join(__dirname, "client/build", "index.html"));
-  });
+  app.get("*", (req, res) =>
+    res.sendFile(path.join(__dirname, "client/build", "index.html"))
+  );
 }
 
-// Start server
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
