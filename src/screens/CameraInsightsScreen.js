@@ -83,9 +83,8 @@ const CameraInsightScreen = ({ route, navigation }) => {
           type: "image/jpeg",
         });
         console.log("FormData prepared:", data);
-
         // 3. POST to your classify endpoint
-        fetch("http://192.168.231.158:5000/api/classify", {
+        fetch("http://192.168.87.240:5000/api/classify", {
           method: "POST",
           body: data,
         })

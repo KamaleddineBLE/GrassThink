@@ -4,23 +4,34 @@ const greenhouses = [
     id: "1",
     name: "Amizour Field",
     isConnected: true,
-    temperature: 25,
-    humidity: 42,
-    windSpeed: 30,
+    
     autoMode: true,
     image: images.greenhouse,
     sensorId: "sensor1",
+    control:{
+      autoMode: false,
+      pump:true,
+      fan:true,
+      light:true,
+      Roof:true,
+    }
+    
   },
   {
     id: "2",
     name: "Mountain View",
     isConnected: false,
-    temperature: 18,
-    humidity: 65,
-    windSpeed: 15,
+   
     autoMode: false,
     image: images.greenhouse,
     sensorId: "sensor2",
+    control:{
+      autoMode: true,
+      pump:true,
+      fan:true,
+      light:true,
+      Roof:true,
+    }
   },
 ];
 

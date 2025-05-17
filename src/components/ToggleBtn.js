@@ -5,21 +5,50 @@ import Animated, {
   useAnimatedStyle,
   withTiming,
 } from 'react-native-reanimated';
-import fan from '../assets/fan.png'
-import tap from '../assets/tap.png'
-import roof from '../assets/roof.png'
-import lamp from '../assets/lamp.png'
-export default function ToggleButton() {
-  const [mode, setMode] = useState('auto');
+
+import fan from '../assets/fan.png';
+import tap from '../assets/tap.png';
+import roof from '../assets/roof.png';
+import lamp from '../assets/lamp.png';
+
+export default function ToggleButton({ Control, GhId, publish }) {
+  const [control, setControl] = useState({
+    autoMode: false,
+    pump: true,
+    fan: true,
+    light: true,
+    roof: true,
+  });
+
   const translateX = useSharedValue(6);
 
   useEffect(() => {
-    // Sync animation when mode changes
-    translateX.value = withTiming(mode === 'auto' ? 60 : 6, { duration: 200 });
-  }, [mode]);
+    setControl({
+      autoMode: Control.autoMode,
+      pump: Control.pump,
+      fan: Control.fan,
+      light: Control.light,
+      roof: Control.roof,
+    });
+  }, [Control]);
+
+  useEffect(() => {
+    translateX.value = withTiming(control.autoMode ? 60 : 6, { duration: 200 });
+  }, [control.autoMode]);
+
+  const publishControl = (newControl) => {
+    setControl(newControl);
+    publish && publish(`greenhouse/${GhId}/control`, newControl);
+  };
 
   const toggleMode = () => {
-    setMode((prev) => (prev === 'auto' ? 'manual' : 'auto'));
+    const updated = { ...control, autoMode: !control.autoMode };
+    publishControl(updated);
+  };
+
+  const toggleDevice = (device) => {
+    const updated = { ...control, [device]: !control[device] };
+    publishControl(updated);
   };
 
   const circleStyle = useAnimatedStyle(() => ({
@@ -31,7 +60,7 @@ export default function ToggleButton() {
       <Pressable
         onPress={toggleMode}
         className={`w-20 h-6 px-2 rounded-xl flex-row items-center z-10 ${
-          mode === 'auto' ? 'bg-green-400' : 'bg-black'
+          control.autoMode ? 'bg-green-400' : 'bg-black'
         }`}
       >
         <Animated.View
@@ -40,50 +69,72 @@ export default function ToggleButton() {
         >
           <View
             className={`${
-              mode === 'manual' ? 'w-1.5 h-1.5 rounded-full bg-black' : 'w-0.5 h-2 rounded-xl bg-green-400'
+              control.autoMode
+                ? 'w-0.5 h-2 rounded-xl bg-green-400'
+                : 'w-1.5 h-1.5 rounded-full bg-black'
             }`}
           />
         </Animated.View>
 
         <View className="flex w-full items-start">
-          {mode === 'auto' ? (
-            <Text className="font-semibold ml-4 text-[10px] text-white">Auto</Text>
-          ) : (
-            <Text className="font-semibold ml-6 text-[10px] text-white">Manual</Text>
-          )}
+          <Text  className={`font-semibold text-[10px] text-white
+            ${
+              control.autoMode
+                ? 'ml-4' 
+                : 'ml-6'
+            }
+            `}>
+            {control.autoMode ? 'Auto' : 'Manual'}
+          </Text>
         </View>
       </Pressable>
 
-      {/* Extra visual black panel */}
-      {mode === 'manual' && (
-        <View style={{gap:'5%'}} className="w-12 h-40 flex items-center pt-5  bg-black rounded-xl absolute top-4 left-6 -mt-1 z-0" >
-          <TouchableOpacity style={{backgroundColor:'#1E1E1E'}} className="w-6 h-6  rounded-full flex items-center justify-center ">
-             <Image source={lamp} style={{resizeMode:'contain'}}  className="w-3 h-4" />
-              
-              
-          </TouchableOpacity>
-          <TouchableOpacity style={{backgroundColor:'#1E1E1E'}} className="w-6 h-6  rounded-full flex items-center justify-center ">
-             <Image source={fan} className="w-3 h-3 opacity-40 " />
-              
-              
-          </TouchableOpacity>
-
-          <TouchableOpacity style={{backgroundColor:'#1E1E1E'}} className="w-6 h-6  rounded-full flex items-center justify-center ">
-             <Image source={tap} style={{resizeMode:'contain'}}className="w-3 h-4" />
-              
-              
-          </TouchableOpacity>
-
-          <TouchableOpacity style={{backgroundColor:'#1E1E1E'}} className="w-6 h-6  rounded-full flex items-center justify-center ">
-             <Image source={roof} style={{resizeMode:'contain'}} className="w-3.5 h-3 opacity-40" />
-              
-              
-          </TouchableOpacity>
-          
-          
+      {!control.autoMode && (
+        <View
+          style={{ gap: '5%' }}
+          className="w-12 h-40 flex items-center pt-5 bg-black rounded-xl absolute top-4 left-6 -mt-1 z-0"
+        >
+          <ControlButton
+            icon={lamp}
+            active={control.light}
+            onPress={() => toggleDevice('light')}
+          />
+          <ControlButton
+            icon={fan}
+            active={control.fan}
+            onPress={() => toggleDevice('fan')}
+          />
+          <ControlButton
+            icon={tap}
+            active={control.pump}
+            onPress={() => toggleDevice('pump')}
+          />
+          <ControlButton
+            icon={roof}
+            active={control.roof}
+            onPress={() => toggleDevice('roof')}
+          />
         </View>
-
       )}
     </View>
+  );
+}
+
+function ControlButton({ icon, active, onPress }) {
+  return (
+    <TouchableOpacity
+      style={{ backgroundColor: '#1E1E1E' }}
+      className="w-6 h-6 rounded-full flex items-center justify-center"
+      onPress={onPress}
+    >
+      <Image
+        source={icon}
+        style={{
+          resizeMode: 'contain',
+          opacity: active ? 1 : 0.4,
+        }}
+        className="w-3 h-3.5"
+      />
+    </TouchableOpacity>
   );
 }
