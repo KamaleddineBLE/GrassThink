@@ -1,4 +1,4 @@
-import React, { useState, useEffect,useContext } from "react";
+import React, { useState, useEffect, useContext } from "react";
 import {
   View,
   Text,
@@ -15,24 +15,26 @@ import GreenhouseCard from "../components/GreenHouseCard";
 import { greenhouses } from "../constants/data";
 import { useNavigation } from "@react-navigation/native";
 import {
-ref,
-onValue,
-off,
-query,
-orderByChild,
-limitToLast,
+  ref,
+  onValue,
+  off,
+  query,
+  orderByChild,
+  limitToLast,
 } from "firebase/database";
+import { get, child } from "firebase/database";
 import { database } from "../services/firebase";
-import { MqttContext } from "../services/mqttService"; 
-import navHome from "../assets/ri_home-line.png"
-import navStat from "../assets/material-symbols_analytics-outline.png"
-import navNoti from "../assets/tdesign_notification-filled.png"
-import navSett from "../assets/ri_settings-line.png"
+import { MqttContext } from "../services/mqttService";
+import navHome from "../assets/ri_home-line.png";
+import navStat from "../assets/material-symbols_analytics-outline.png";
+import navNoti from "../assets/tdesign_notification-filled.png";
+import navSett from "../assets/ri_settings-line.png";
 
 export default function HomeScreen() {
   const navigation = useNavigation();
-  // const { sensorDataa } = useContext(MqttContext); 
+  // const { sensorDataa } = useContext(MqttContext);
   const [sensorData, setSensorData] = useState({});
+  const [greenhouseList, setGreenhouseList] = useState([]);
 
   const [loading, setLoading] = useState("true");
 
@@ -45,64 +47,71 @@ export default function HomeScreen() {
     let isMounted = true;
     const listeners = [];
 
-    const setupListeners = () => {
-      greenhouses.forEach((gh) => {
-        const key = `sensor${gh.id}`;
+    const dbRef = ref(database);
 
-        // Create a query: order by timestamp and limit to last entry
-        const sensorQuery = query(
-          ref(database, key),
-          orderByChild("timestamp"),
-          limitToLast(1)
-        );
+    // Attach a real-time listener to the root path
+    const listener = onValue(
+      dbRef,
+      (snapshot) => {
+        const fetched = {};
 
-        const listener = onValue(
-          sensorQuery,
-          (snapshot) => {
-            let latestData = null;
+        if (snapshot.exists()) {
+          snapshot.forEach((childSnapshot) => {
+            const greenhouse = childSnapshot.val();
+            console.log("Greenhouse data:", greenhouse);
+            const { greenhouseId, readings } = greenhouse;
 
-            // Iterate through snapshot (even if there's only 1 child)
-            snapshot.forEach((childSnapshot) => {
-              latestData = childSnapshot.val();
-            });
+            if (
+              greenhouseId &&
+              Array.isArray(readings) &&
+              readings.length > 0
+            ) {
+              // Sort readings by timestamp descending
+              const sorted = [...readings].sort(
+                (a, b) => new Date(b.timestamp) - new Date(a.timestamp)
+              );
 
-            if (isMounted) {
-              setSensorData((prev) => ({
-                ...prev,
-                [gh.id]: latestData ?? {},
-              }));
-              setLoading(false);
+              // Save the latest reading per greenhouseId
+              fetched[greenhouseId] = sorted[0];
             }
-          },
-          (err) => {
-            console.error(`Realtime error for ${key}:`, err);
-            setError("Failed to load sensor data");
+          });
+
+          if (isMounted) {
+            setSensorData(fetched);
+            console.log("Fetched sensor data:", fetched);
             setLoading(false);
           }
-        );
+        } else {
+          if (isMounted) {
+            setSensorData({});
+            setLoading(false);
+          }
+        }
+      },
+      (err) => {
+        console.error("Realtime error:", err);
+        if (isMounted) {
+          setError("Failed to load sensor data");
+          setLoading(false);
+        }
+      }
+    );
 
-        listeners.push({ queryRef: sensorQuery, listener });
-      });
-    };
-
-    setupListeners();
+    listeners.push({ ref: dbRef, listener });
 
     return () => {
       isMounted = false;
-      listeners.forEach(({ queryRef, listener }) => {
+      // Remove all listeners
+      listeners.forEach(({ ref: queryRef, listener }) => {
         off(queryRef, "value", listener);
       });
     };
   }, []);
 
-
   const onPressNavigationTab = (tab) => {
     setSelectedTab(tab);
     navigation.navigate(tab.charAt(0).toUpperCase() + tab.slice(1));
   };
-
-  
-
   return (
     <View className="flex-1 bg-white ">
       {/* Header */}
@@ -148,7 +157,12 @@ export default function HomeScreen() {
             }}
             renderItem={({ item }) => (
               <View style={{ width: cardWidth, marginRight: spacing }}>
-                <GreenhouseCard id={item.id} name={item.name}  Dbdata={sensorData[item.id]} control={item.control}/>
+                <GreenhouseCard
+                  id={item.id}
+                  name={item.name}
+                  Dbdata={sensorData[item.sensorId]} 
+                  control={item.control}
+                />
               </View>
             )}
           />
@@ -160,14 +174,14 @@ export default function HomeScreen() {
         style={{ borderRadius: 20, alignSelf: "center" }}
         className="absolute w-4/5 bottom-6  mx-auto px-8 py-5 bg-black border-t flex-row justify-between items-center"
       >
-        <TouchableOpacity >
-          <Image  source={navHome} className="w-6 h-6 "/>
+        <TouchableOpacity>
+          <Image source={navHome} className="w-6 h-6 " />
         </TouchableOpacity>
         <TouchableOpacity>
-           <Image  source={navStat} className="w-6 h-6 opacity-50"/>  
+          <Image source={navStat} className="w-6 h-6 opacity-50" />
         </TouchableOpacity>
         <TouchableOpacity>
-            <Image  source={navNoti} className="w-6 h-6 opacity-100"/>  
+          <Image source={navNoti} className="w-6 h-6 opacity-100" />
         </TouchableOpacity>
         <TouchableOpacity
           onPress={() => onPressNavigationTab("CameraInsights")}

@@ -61,10 +61,10 @@ const CameraInsightScreen = ({ route, navigation }) => {
   const pickAndUpload = async () => {
     // 1. Pick a photo
     try {
-      const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
-        quality: 0.8,
-        allowsEditing: true,
+      let result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ["images"],
+        allowsEditing: false,
+        quality: 1,
       });
 
       // Check if the user canceled the picker
@@ -83,8 +83,9 @@ const CameraInsightScreen = ({ route, navigation }) => {
           type: "image/jpeg",
         });
         console.log("FormData prepared:", data);
+        //192.168.32.158:8081
         // 3. POST to your classify endpoint
-        fetch("http://192.168.87.240:5000/api/classify", {
+        exp: fetch("http://192.168.116.158:5000/api/classify", {
           method: "POST",
           body: data,
         })
@@ -146,6 +147,25 @@ const CameraInsightScreen = ({ route, navigation }) => {
         style={styles.plantImage}
         resizeMode="cover"
       />
+      {/* Upload Button */}
+      <TouchableOpacity style={styles.uploadButton} onPress={pickAndUpload}>
+        <Text style={styles.uploadButtonText}>Upload Image</Text>
+      </TouchableOpacity>
+
+      {/* Prediction Result */}
+      {prediction && (
+        <View style={styles.resultCard}>
+          <Text style={styles.resultTitle}>Analysis Results:</Text>
+          <Text style={styles.resultText}>
+            {prediction.class === "FN"
+              ? "No deficiency detected"
+              : `Deficiency: ${prediction.class.replace("-", "")}`}
+          </Text>
+          <Text style={styles.resultText}>
+            Confidence: {(prediction.confidence * 100).toFixed(1)}%
+          </Text>
+        </View>
+      )}
 
       {/* AI Insights Section */}
       <View style={styles.insightsContainer}>
@@ -170,32 +190,13 @@ const CameraInsightScreen = ({ route, navigation }) => {
                 deficiencyClass: prediction?.class,
               })
             }
+            disabled={!prediction || prediction.class === "FN"}
           >
             <Text style={styles.optimizeText}>Optimize</Text>
             <Ionicons name="chevron-forward" size={16} color="#4ade80" />
           </TouchableOpacity>
         </View>
       </View>
-
-      {/* Prediction Result */}
-      {prediction && (
-        <View style={styles.resultCard}>
-          <Text style={styles.resultTitle}>Analysis Results:</Text>
-          <Text style={styles.resultText}>
-            {prediction.class === "FN"
-              ? "No deficiency detected"
-              : `Deficiency: ${prediction.class.replace("-", "")}`}
-          </Text>
-          <Text style={styles.resultText}>
-            Confidence: {(prediction.confidence * 100).toFixed(1)}%
-          </Text>
-        </View>
-      )}
-
-      {/* Upload Button */}
-      <TouchableOpacity style={styles.uploadButton} onPress={pickAndUpload}>
-        <Text style={styles.uploadButtonText}>Upload Image</Text>
-      </TouchableOpacity>
     </SafeAreaView>
   );
 };
@@ -296,6 +297,7 @@ const styles = StyleSheet.create({
     padding: 12,
     alignItems: "center",
     marginBottom: 16,
+    marginTop: 16,
   },
   uploadButtonText: {
     color: "#fff",

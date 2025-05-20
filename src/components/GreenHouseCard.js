@@ -1,11 +1,11 @@
-import React, { useState } from "react";import {
+import React, { useEffect, useState } from "react";
+import {
   View,
   Text,
   FlatList,
   ImageBackground,
   Dimensions,
   Image,
-
 } from "react-native";
 import ToggleButton from "./ToggleBtn";
 import CardBg from "../assets/CardBg.png";
@@ -14,42 +14,65 @@ import chev from "../assets/chev.png";
 import SensorCard from "./Indicator";
 import MqttSensorListener from "../services/mqttlistener";
 
-export default function GreenhouseCard({ id,name, onPress,control}) {
+export default function GreenhouseCard({ id, name, onPress, control, Dbdata }) {
   const screenHeight = Dimensions.get("window").height;
-  const Dbdata = {
-    temperature: 0,
-    humidity: 0,
-    conductivity: 0,
-    nitrogen: 0,
-    phosphorus: 0,
-    potassium: 0,
-    ph: 0,
-    dht_humidity: 0,
-    dht_temperature: 0,
-  };
   const [data, setData] = useState(Dbdata);
   const topic = `greenhouse/${id}`;
 
   // Map the sensor data from the database to the required format
   const sensorData = [
-    { value: data.temperature.toString() , unit: "°C", label: "Temperature" },
-    { value: data.humidity.toString(), unit: "%", label: "Humidity" },
     {
-      value: data.conductivity.toString(),
+      value: data?.temperature?.toString() || "0",
+      unit: "°C",
+      label: "Temperature",
+    },
+    {
+      value: data?.humidity?.toString() || "0",
+      unit: "%",
+      label: "Humidity",
+    },
+    {
+      value: data?.conductivity?.toString() || "0",
       unit: "µS/cm",
       label: "Conductivity",
     },
-    { value: data.nitrogen.toString(), unit: "ppm", label: "Nitrogen" },
-    { value: data.phosphorus.toString(), unit: "ppm", label: "Phosphorus" },
-    { value: data.potassium.toString(), unit: "ppm", label: "Potassium" },
-    { value: data.ph.toString(), unit: "", label: "pH" },
-    { value: data.dht_humidity.toString(), unit: "%", label: "DHT Humidity" },
     {
-      value: data.dht_temperature.toString(),
+      value: data?.nitrogen?.toString() || "0",
+      unit: "ppm",
+      label: "Nitrogen",
+    },
+    {
+      value: data?.phosphorus?.toString() || "0",
+      unit: "ppm",
+      label: "Phosphorus",
+    },
+    {
+      value: data?.potassium?.toString() || "0",
+      unit: "ppm",
+      label: "Potassium",
+    },
+    {
+      value: data?.ph?.toString() || "0",
+      unit: "",
+      label: "pH",
+    },
+    {
+      value: data?.dht_humidity?.toString() || "0",
+      unit: "%",
+      label: "DHT Humidity",
+    },
+    {
+      value: data?.dht_temperature?.toString() || "0",
       unit: "°C",
       label: "DHT Temperature",
     },
   ];
+
+  useEffect(() => {
+    if (Dbdata) {
+      setData(Dbdata);
+    }
+  }, [Dbdata]);
 
   const chunkArray = (array, size) => {
     const result = [];
@@ -116,7 +139,11 @@ export default function GreenhouseCard({ id,name, onPress,control}) {
         />
         <Image source={chev} style={{ position: "absolute", bottom: "9%" }} />
       </ImageBackground>
-      <MqttSensorListener topic={topic} onData={setData} onControl={(publishFn) => setPublishFn(() => publishFn)}  />
+      <MqttSensorListener
+        topic={topic}
+        onData={setData}
+        onControl={(publishFn) => setPublishFn(() => publishFn)}
+      />
     </View>
   );
 }

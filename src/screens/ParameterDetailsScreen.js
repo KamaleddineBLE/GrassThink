@@ -24,27 +24,59 @@ import {
   get,
   onValue,
 } from "firebase/database";
+import { child } from "firebase/database";
+
 import { database } from "../services/firebase";
-import { chunkArray, greenhouses, sensorData } from "../constants/data";
+import { chunkArray, greenhouses } from "../constants/data";
 import SensorCardParams from "../components/SensorCardParams";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 
 const HistoricalDataScreen = ({ route, navigation }) => {
   const { paramType, paramName, fieldName } = route.params;
 
-  const chunkedSensors = chunkArray(sensorData, 3);
+  // Initialize selectedParam with the initial parameter from route params
   const [selectedParam, setSelectedParam] = useState(paramName);
 
   const [selectedGH, setSelectedGH] = useState(() => {
-    if (fieldName === "Amizour Field") return "sensor1";
-    if (fieldName === "Mountain View") return "sensor2";
-    return "sensor1";
+    if (fieldName === "Amizour Field") return "GH1";
+    if (fieldName === "Mountain View") return "GH2";
+    return "GH1";
   });
   const [timeRange, setTimeRange] = useState("week");
   const [isLoading, setIsLoading] = useState(true);
+
   // rawData now holds both sensors keyed by ID
   const [rawData, setRawData] = useState({ sensor1: [], sensor2: [] });
   const [chartData, setChartData] = useState([]);
   const [stats, setStats] = useState({ min: 0, max: 0, avg: 0, current: 0 });
+  const [sensorData, setSensorData] = useState([
+    {
+      value: "0",
+      unit: "°C",
+      label: "Temperature",
+    },
+    { value: "0", unit: "%", label: "Humidity" },
+    {
+      value: "0",
+      unit: "µS/cm",
+      label: "Conductivity",
+    },
+    { value: "0", unit: "ppm", label: "Nitrogen" },
+    { value: "0", unit: "ppm", label: "Phosphorus" },
+    { value: "0", unit: "ppm", label: "Potassium" },
+    { value: "0", unit: "", label: "pH" },
+    {
+      value: "0",
+      unit: "%",
+      label: "DHT Humidity",
+    },
+    {
+      value: "0",
+      unit: "°C",
+      label: "DHT Temperature",
+    },
+  ]);
+
   const pickerRef = useRef();
 
   const timeRangeMap = useMemo(
@@ -56,6 +88,105 @@ const HistoricalDataScreen = ({ route, navigation }) => {
     }),
     []
   );
+  const getCacheKey = (gh, param, range) => `chartData_${gh}_${param}_${range}`;
+
+  const storeChartData = async (gh, param, range, chart, stats) => {
+    try {
+      const key = getCacheKey(gh, param, range);
+      const value = JSON.stringify({ chart, stats });
+      await AsyncStorage.setItem(key, value);
+    } catch (error) {
+      console.warn("Error saving chart data to cache:", error);
+    }
+  };
+
+  const loadChartDataFromCache = async (gh, param, range) => {
+    try {
+      const key = getCacheKey(gh, param, range);
+      const jsonValue = await AsyncStorage.getItem(key);
+      if (jsonValue != null) {
+        console.log("Loaded chart data from cache:", jsonValue);
+        return JSON.parse(jsonValue);
+      }
+      return null;
+    } catch (e) {
+      console.warn("Error reading chart data from cache:", e);
+      return null;
+    }
+  };
+
+  // Generate sensorData based on the current selected sensor
+  const generateSensorData = (data) => {
+    return [
+      {
+        value: data.temperature ? data.temperature.toString() : "0",
+        unit: "°C",
+        label: "Temperature",
+      },
+      {
+        value: data.humidity ? data.humidity.toString() : "0",
+        unit: "%",
+        label: "Humidity",
+      },
+      {
+        value: data.conductivity ? data.conductivity.toString() : "0",
+        unit: "µS/cm",
+        label: "Conductivity",
+      },
+      {
+        value: data.nitrogen ? data.nitrogen.toString() : "0",
+        unit: "ppm",
+        label: "Nitrogen",
+      },
+      {
+        value: data.phosphorus ? data.phosphorus.toString() : "0",
+        unit: "ppm",
+        label: "Phosphorus",
+      },
+      {
+        value: data.potassium ? data.potassium.toString() : "0",
+        unit: "ppm",
+        label: "Potassium",
+      },
+      {
+        value: data.ph ? data.ph.toString() : "0",
+        unit: "",
+        label: "pH",
+      },
+      {
+        value: data.dht_humidity ? data.dht_humidity.toString() : "0",
+        unit: "%",
+        label: "DHT Humidity",
+      },
+      {
+        value: data.dht_temperature ? data.dht_temperature.toString() : "0",
+        unit: "°C",
+        label: "DHT Temperature",
+      },
+    ];
+  };
+  const GLOBAL_CACHE_KEY = "all_greenhouse_data";
+
+  const storeAllSensorData = async (data) => {
+    try {
+      if (data) {
+        console.info("data is cached");
+      }
+      await AsyncStorage.setItem(GLOBAL_CACHE_KEY, JSON.stringify(data));
+    } catch (e) {
+      console.warn("Error caching all greenhouse data:", e);
+    }
+  };
+
+  const loadAllSensorDataFromCache = async () => {
+    try {
+      const json = await AsyncStorage.getItem(GLOBAL_CACHE_KEY);
+      return json ? JSON.parse(json) : null;
+    } catch (e) {
+      console.warn("Error loading cached greenhouse data:", e);
+      return null;
+    }
+  };
 
   const aggregateDataForScreen = (data, maxPoints) => {
     if (data.length <= maxPoints) return data;
@@ -77,65 +208,93 @@ const HistoricalDataScreen = ({ route, navigation }) => {
   const fetchSensorData = async () => {
     setIsLoading(true);
     try {
-      const cutoffTime = Date.now() - timeRangeMap[timeRange];
-      console.log("cutoffTime:", new Date(cutoffTime).toISOString());
+      let fetched = await loadAllSensorDataFromCache();
+      // let fetched = null; // Initialize fetched to null
 
-      const sensorIds = ["sensor1", "sensor2"];
-      const fetched = {};
+      if (!fetched) {
+        const dbRef = ref(database);
+        const snapshot = await get(child(dbRef, "/")); // get all greenhouses
 
-      // Parallel fetch
-      await Promise.all(
-        sensorIds.map(async (id) => {
-          const sensorRef = ref(database, id);
-          const dataQuery = query(
-            sensorRef,
-            orderByChild("timestamp"),
-            startAt(cutoffTime)
-          );
-          const snapshot = await get(dataQuery);
-          // console.log("Fetched data for", id, snapshot.val());
+        fetched = {};
+        if (snapshot.exists()) {
+          snapshot.forEach((childSnapshot) => {
+            const greenhouse = childSnapshot.val();
+            const { greenhouseId, readings } = greenhouse;
 
-          if (snapshot.exists()) {
-            fetched[id] = [];
-            snapshot.forEach((childSnapshot) => {
-              const data = childSnapshot.val();
-              // console.log("Data item:", data);
-              fetched[id].push({
-                ...data,
-                timestamp: new Date(data.timestamp).toISOString(),
-              });
-            });
+            if (readings) {
+              const filtered = readings
+                .map((reading) => {
+                  const rawTimestamp = reading.timestamp || "";
+                  const validTimestamp = rawTimestamp.includes("T")
+                    ? rawTimestamp
+                    : rawTimestamp.replace(" ", "T");
 
-            // Sort by timestamp
-            fetched[id].sort((a, b) => a.timestamp - b.timestamp);
-          } else {
-            console.log("No data available for", id);
-            fetched[id] = [];
-          }
-        })
-      );
+                  const date = new Date(validTimestamp);
+                  if (isNaN(date.getTime())) return null;
 
-      // now both sensor1 and sensor2 are in fetched
-      // console.log("All fetched data:", fetched);
+                  return {
+                    ...reading,
+                    timestamp: validTimestamp,
+                  };
+                })
+                .filter(Boolean)
+                .sort(
+                  (a, b) =>
+                    new Date(a.timestamp).getTime() -
+                    new Date(b.timestamp).getTime()
+                );
+
+              fetched[greenhouseId] = filtered;
+            } else {
+              fetched[greenhouseId] = [];
+            }
+          });
+
+          await storeAllSensorData(fetched); // cache the full data
+        } else {
+          console.log("No data available");
+        }
+      }
 
       setRawData(fetched);
-      processChartData(fetched[selectedGH]);
+
+      const selectedSensorData = fetched[selectedGH];
+      processChartData(selectedSensorData);
+
+      if (selectedSensorData && selectedSensorData.length > 0) {
+        const latestDataPoint =
+          selectedSensorData[selectedSensorData.length - 1];
+        const updatedSensorData = generateSensorData(latestDataPoint);
+        setSensorData(updatedSensorData);
+      }
     } catch (error) {
       console.error(error);
       Alert.alert("Data Error", "Failed to fetch sensor data.");
-      setRawData({ sensor1: [], sensor2: [] });
+      setRawData({});
       setChartData([]);
       setStats({ min: 0, max: 0, avg: 0, current: 0 });
+      setSensorData((prevSensorData) =>
+        prevSensorData.map((item) => ({
+          ...item,
+          value: "0",
+        }))
+      );
     } finally {
       setIsLoading(false);
     }
   };
 
   // Process the raw data into chart format and calculate statistics
-  const processChartData = (data) => {
+  const processChartData = async (data) => {
     if (!data || data.length === 0) {
       setChartData([]);
       setStats({ min: 0, max: 0, avg: 0, current: 0 });
+      return;
+    }
+    const cached = await loadAllSensorDataFromCache();
+    if (cached) {
+      setChartData(cached.chart);
+      setStats(cached.stats);
       return;
     }
 
@@ -150,11 +309,14 @@ const HistoricalDataScreen = ({ route, navigation }) => {
       const hourlyData = {};
       data.forEach((item) => {
         const date = new Date(item.timestamp);
+        if (isNaN(date.getTime())) return; // skip bad date
+
         const hour = date.getHours();
         if (!hourlyData[hour]) {
           hourlyData[hour] = { sum: 0, count: 0 };
         }
-        hourlyData[hour].sum += parseFloat(item[paramName] || 0);
+        // Use selectedParam instead of hard-coded paramName
+        hourlyData[hour].sum += parseFloat(item[selectedParam] || 0);
         hourlyData[hour].count += 1;
       });
 
@@ -175,7 +337,8 @@ const HistoricalDataScreen = ({ route, navigation }) => {
         if (!dailyData[day]) {
           dailyData[day] = { sum: 0, count: 0 };
         }
-        dailyData[day].sum += parseFloat(item[paramName] || 0);
+        // Use selectedParam instead of hard-coded paramName
+        dailyData[day].sum += parseFloat(item[selectedParam] || 0);
         dailyData[day].count += 1;
       });
 
@@ -201,7 +364,8 @@ const HistoricalDataScreen = ({ route, navigation }) => {
         if (!weeklyData[weekKey]) {
           weeklyData[weekKey] = { sum: 0, count: 0 };
         }
-        weeklyData[weekKey].sum += parseFloat(item[paramName] || 0);
+        // Use selectedParam instead of hard-coded paramName
+        weeklyData[weekKey].sum += parseFloat(item[selectedParam] || 0);
         weeklyData[weekKey].count += 1;
       });
 
@@ -230,7 +394,8 @@ const HistoricalDataScreen = ({ route, navigation }) => {
         if (!monthlyData[monthKey]) {
           monthlyData[monthKey] = { sum: 0, count: 0 };
         }
-        monthlyData[monthKey].sum += parseFloat(item[paramName] || 0);
+        // Use selectedParam instead of hard-coded paramName
+        monthlyData[monthKey].sum += parseFloat(item[selectedParam] || 0);
         monthlyData[monthKey].count += 1;
       });
 
@@ -293,51 +458,110 @@ const HistoricalDataScreen = ({ route, navigation }) => {
     } else {
       setStats({ min: 0, max: 0, avg: 0, current: 0 });
     }
+    try {
+      await AsyncStorage.setItem(
+        getCacheKey(selectedGH, selectedParam, timeRange),
+        JSON.stringify({
+          chart: aggregatedData,
+          stats: {
+            min: Math.min(...aggregatedData.map((d) => d.value)),
+            max: Math.max(...aggregatedData.map((d) => d.value)),
+            avg: parseFloat(
+              (
+                aggregatedData.reduce((sum, d) => sum + d.value, 0) /
+                aggregatedData.length
+              ).toFixed(1)
+            ),
+            current: aggregatedData[aggregatedData.length - 1].value,
+          },
+        })
+      );
+    } catch (err) {
+      console.warn("Error caching chart data", err);
+    }
   };
 
   // Re-process when changing selection or time range or param
   useEffect(() => {
     if (rawData[selectedGH]) {
       processChartData(rawData[selectedGH]);
+
+      // Find the most recent data point for the current sensor
+      const sensorDataPoints = rawData[selectedGH];
+      const latestDataPoint =
+        sensorDataPoints.length > 0
+          ? sensorDataPoints[sensorDataPoints.length - 1]
+          : {};
+
+      // Update sensorData with the latest data point
+      const updatedSensorData = generateSensorData(latestDataPoint);
+      setSensorData(updatedSensorData);
     }
-  }, [selectedGH, timeRange, selectedParam]);
+  }, [selectedGH, timeRange, selectedParam, rawData]);
 
   // Initial fetch once
   useEffect(() => {
     fetchSensorData();
-
-    // Set up real-time listener for new data
-    const sensorRef = ref(database, `${selectedGH}`);
-    const unsubscribe = onValue(sensorRef, (snapshot) => {
-      // This will trigger when data changes in Firebase
-      // We could update the chart in real-time, but for now let's just
-      // log it to keep the app's performance optimal
-      console.log("New data available in Firebase");
-
-      // To auto-refresh, uncomment the line below
-      // fetchSensorData();
-    });
-
-    // Clean up the listener when the component unmounts
-    return () => unsubscribe();
   }, []);
 
+  // useEffect(() => {
+  //   fetchSensorData();
+
+  //   // Set up real-time listener for new data
+  //   const sensorRef = ref(database, `${selectedGH}`);
+  //   const unsubscribe = onValue(sensorRef, (snapshot) => {
+  //     console.log("New data available in Firebase");
+  //     fetchSensorData();
+  //   }
+  // );
+
+  //   // Clean up the listener when the component unmounts
+  //   return () => unsubscribe();
+  // }, []);
+
   const ParameterPress = (param) => {
-    setSelectedParam(param);
-    console.log("Selected parameter:", param);
+    // Map the label to the corresponding parameter name
+    const parameterMap = {
+      Temperature: "temperature",
+      Humidity: "humidity",
+      Conductivity: "conductivity",
+      Nitrogen: "nitrogen",
+      Phosphorus: "phosphorus",
+      Potassium: "potassium",
+      pH: "ph",
+      "DHT Humidity": "dht_humidity",
+      "DHT Temperature": "dht_temperature",
+    };
+
+    const paramName = parameterMap[param];
+
+    if (paramName) {
+      setSelectedParam(paramName);
+      console.log("Selected parameter:", paramName);
+    }
   };
 
   // Get the appropriate unit for the selected parameter
   const getUnit = () => {
-    switch (paramName) {
+    switch (selectedParam) {
       case "temperature":
         return "°C";
       case "humidity":
         return "%";
-      case "windSpeed":
-        return "km/h";
-      case "soil":
+      case "conductivity":
+        return "µS/cm";
+      case "nitrogen":
+        return "ppm";
+      case "phosphorus":
+        return "ppm";
+      case "potassium":
+        return "ppm";
+      case "ph":
+        return "";
+      case "dht_humidity":
         return "%";
+      case "dht_temperature":
+        return "°C";
       default:
         return "";
     }
@@ -347,41 +571,38 @@ const HistoricalDataScreen = ({ route, navigation }) => {
   const titleMap = {
     temperature: "Temperature",
     humidity: "Humidity",
-    windSpeed: "Wind Speed",
-    soil: "Soil Moisture",
+    conductivity: "Conductivity",
+    nitrogen: "Nitrogen",
+    phosphorus: "Phosphorus",
+    potassium: "Potassium",
+    ph: "pH",
+    dht_humidity: "DHT Humidity",
+    dht_temperature: "DHT Temperature",
   };
+  const chunkedSensors = chunkArray(sensorData, 3);
 
   // Display stats in the UI
   const renderStats = () => {
-    if (chartData.length === 0) return null;
-
     return (
       <View style={styles.statsContainer}>
         <View style={styles.statBox}>
           <Text style={styles.statLabel}>MIN</Text>
           <Text style={styles.statValue}>
-            {stats.min}
+            {stats.min || 0}
             {getUnit()}
           </Text>
         </View>
         <View style={styles.statBox}>
           <Text style={styles.statLabel}>MAX</Text>
           <Text style={styles.statValue}>
-            {stats.max}
+            {stats.max || 0}
             {getUnit()}
           </Text>
         </View>
         <View style={styles.statBox}>
           <Text style={styles.statLabel}>AVG</Text>
           <Text style={styles.statValue}>
-            {stats.avg}
-            {getUnit()}
-          </Text>
-        </View>
-        <View style={styles.statBox}>
-          <Text style={styles.statLabel}>CURRENT</Text>
-          <Text style={styles.statValue}>
-            {stats.current}
+            {stats.avg || 0}
             {getUnit()}
           </Text>
         </View>
@@ -398,7 +619,7 @@ const HistoricalDataScreen = ({ route, navigation }) => {
             <Ionicons name="arrow-back" size={24} color="#000" />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>
-            {titleMap[paramName] || paramName} History
+            {titleMap[selectedParam] || selectedParam} History
           </Text>
           <View style={{ width: 24 }} />
         </View>
@@ -524,6 +745,25 @@ const HistoricalDataScreen = ({ route, navigation }) => {
                 pointerLabelHeight: 90,
                 activatePointersOnLongPress: true,
                 autoAdjustPointerLabelPosition: false,
+                pointerComponent: (items) => {
+                  return (
+                    <View
+                      style={{
+                        width: 20,
+                        height: 20,
+                        borderRadius: 10,
+                        backgroundColor: "#4ade80", // Blue fill
+                        borderWidth: 3,
+                        borderColor: "white",
+                        shadowColor: "#000",
+                        shadowOffset: { width: 0, height: 2 },
+                        shadowOpacity: 0.2,
+                        shadowRadius: 3,
+                        elevation: 4, // For Android shadow
+                      }}
+                    />
+                  );
+                },
                 pointerLabelComponent: (items) => {
                   return (
                     <View
@@ -598,20 +838,12 @@ const HistoricalDataScreen = ({ route, navigation }) => {
                   label={sensor.label}
                   type="environment"
                   fieldName={fieldName}
-                  handlePress={ParameterPress}
+                  handlePress={() => ParameterPress(sensor.label)}
                 />
               ))}
             </View>
           )}
         />
-
-        {/* Refresh Button */}
-        {/* <TouchableOpacity
-          style={styles.refreshButton}
-          onPress={fetchSensorData}
-        >
-          <Ionicons name="refresh" size={22} color="#fff" />
-        </TouchableOpacity> */}
       </View>
     </SafeAreaView>
   );
@@ -715,22 +947,6 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: "bold",
     color: "#4ade80",
-  },
-  refreshButton: {
-    position: "absolute",
-    bottom: 20,
-    right: 20,
-    backgroundColor: "#4ade80",
-    width: 50,
-    height: 50,
-    borderRadius: 25,
-    justifyContent: "center",
-    alignItems: "center",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.25,
-    shadowRadius: 3.84,
-    elevation: 5,
   },
 });
 
