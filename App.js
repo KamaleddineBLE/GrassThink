@@ -22,8 +22,7 @@ import {
   Inter_800ExtraBold,
   Inter_900Black,
 } from "@expo-google-fonts/inter";
-
-
+import WeatherDetailsScreen from "./src/screens/WeatherDetailsScreen";
 
 // Prevent splash screen from auto-hiding
 const Stack = createStackNavigator();
@@ -49,31 +48,37 @@ export default function App() {
   if (!fontsLoaded) return null;
 
   return (
-      <NavigationContainer>
-        <Stack.Navigator>
-          <Stack.Screen
-            name="Home"
-            component={HomeScreen}
-            options={{ headerShown: false }}
-          />
-          <Stack.Screen
-            name="ParameterDetails"
-            component={ParameterDetailsScreen}
-            options={{ headerShown: false }}
-          />
-          <Stack.Screen
-            name="CameraInsights"
-            component={CameraInsightsScreen}
-            options={{ headerShown: false }}
-          />
-          <Stack.Screen
-            name="Optimization"
-            component={OptimizationScreen}
-            options={{ headerShown: false }}
-          />
-          {/* Add other screens here */}
-        </Stack.Navigator>
-        <StatusBar style="auto" />
-      </NavigationContainer>
+    <NavigationContainer>
+      <Stack.Navigator>
+        <Stack.Screen
+          name="Home"
+          component={HomeScreen}
+          options={{ headerShown: false }}
+        />
+        <Stack.Screen
+          name="ParameterDetails"
+          component={ParameterDetailsScreen}
+          options={{ headerShown: false }}
+        />
+        <Stack.Screen
+          name="CameraInsights"
+          component={CameraInsightsScreen}
+          options={{ headerShown: false }}
+        />
+        <Stack.Screen
+          name="Optimization"
+          component={OptimizationScreen}
+          options={{ headerShown: false }}
+        />
+
+        <Stack.Screen
+          name="WeatherDetails"
+          component={WeatherDetailsScreen}
+          options={{ headerShown: false }}
+        />
+        {/* Add other screens here */}
+      </Stack.Navigator>
+      <StatusBar style="auto" />
+    </NavigationContainer>
   );
 }

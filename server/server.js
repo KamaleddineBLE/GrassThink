@@ -6,7 +6,12 @@ const path = require("path");
 const multer = require("multer");
 const ort = require("onnxruntime-node");
 const sharp = require("sharp");
+const axios = require("axios");
+const fs = require("fs");
+
 require("dotenv").config();
+const aiRoute = require("./services/ai");
+const actuatorsControl = require("./services/controle_actuators");
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -273,6 +278,150 @@ app.get("/api/multi-sensor-data", async (req, res) => {
     res.status(500).json({ error: "Database error", details: err.message });
   }
 });
+
+app.get("/api/weather", async (req, res) => {
+  const { lat, lon } = req.query;
+  const apiKey =
+    process.env.WEATHER_API_KEY || "cc3d4e7f14ec4f0cba0153348252305";
+
+  if (!lat || !lon) {
+    return res.status(400).json({ error: "Missing lat or lon" });
+  }
+
+  try {
+    const weatherUrl = `http://api.weatherapi.com/v1/forecast.json?key=${apiKey}&q=${lat},${lon}&aqi=no`;
+    if (weatherUrl) {
+      // console.log("Weather API URL:", weatherUrl);
+    }
+    const response = await axios.get(weatherUrl);
+    res.json(response.data);
+  } catch (err) {
+    console.error("Weather API error:", err.message);
+    res.status(500).json({ error: "Weather API request failed" });
+  }
+});
+
+async function fetchAndSaveWeatherHistory() {
+  const apiKey = "cc3d4e7f14ec4f0cba0153348252305";
+  const lat = "36.6642006";
+  const lon = "4.9131258";
+  const filePath = path.join(__dirname, "history.json");
+
+  // Load existing data or initialize empty object
+  let history = {};
+  if (fs.existsSync(filePath)) {
+    try {
+      history = JSON.parse(fs.readFileSync(filePath));
+    } catch (err) {
+      console.warn("Failed to parse history.json, starting fresh.");
+      history = {};
+    }
+  }
+
+  // Generate all dates between start and end
+  const startDate = new Date("2025-01-28");
+  const endDate = new Date("2025-02-24");
+
+  for (let d = new Date(startDate); d <= endDate; d.setDate(d.getDate() + 1)) {
+    const dateStr = d.toISOString().split("T")[0];
+
+    // Skip if already fetched
+    if (history[dateStr]) {
+      console.log(`Skipping ${dateStr} (already exists)`);
+      continue;
+    }
+
+    const url = `http://api.weatherapi.com/v1/history.json?key=${apiKey}&q=${lat},${lon}&dt=${dateStr}`;
+
+    try {
+      const response = await axios.get(url);
+      const hourlyData = response.data.forecast.forecastday[0].hour;
+
+      // Save only hourly data keyed by date
+      history[dateStr] = hourlyData;
+      // console.log(`Fetched ${dateStr}`);
+    } catch (err) {
+      console.error(`Failed for ${dateStr}:`, err.message);
+    }
+
+    // Optional: Wait between requests to avoid rate limiting
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+  }
+
+  fs.writeFileSync(filePath, JSON.stringify(history, null, 2));
+  console.log(`All data saved to ${filePath}`);
+}
+
+app.get("/api/save-weather-history", async (req, res) => {
+  try {
+    await fetchAndSaveWeatherHistory();
+    res.json({ message: "Weather history updated successfully" });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to fetch weather history" });
+  }
+});
+
+// async function fetchAndSaveWeatherHistory() {
+//   const apiKey = "cc3d4e7f14ec4f0cba0153348252305"; // Use env var for production
+//   const lat = "36.6642006";
+//   const lon = "4.9131258";
+//   const date = "2025-02-18"; // Change this dynamically if needed
+//   const url = `http://api.weatherapi.com/v1/history.json?key=${apiKey}&q=${lat},${lon}&dt=${date}`;
+
+//   const filePath = path.resolve("./history.json");
+
+//   try {
+//     const response = await axios.get(url);
+//     const newData = response.data;
+
+//     let existingData = [];
+
+//     if (fs.existsSync(filePath)) {
+//       const fileContent = fs.readFileSync(filePath, "utf8");
+//       existingData = JSON.parse(fileContent);
+//     }
+
+//     // Ensure data is in array format
+//     if (!Array.isArray(existingData)) {
+//       existingData = [existingData];
+//     }
+
+//     // Remove existing entry for the same date if present
+//     const filteredData = existingData.filter(
+//       (entry) =>
+//         entry.forecast?.forecastday?.[0]?.date !==
+//         newData.forecast?.forecastday?.[0]?.date
+//     );
+
+//     // Add the new data
+//     filteredData.push(newData);
+
+//     // Sort by date ascending
+//     filteredData.sort((a, b) => {
+//       const dateA = new Date(a.forecast?.forecastday?.[0]?.date);
+//       const dateB = new Date(b.forecast?.forecastday?.[0]?.date);
+//       return dateA - dateB;
+//     });
+
+//     fs.writeFileSync(filePath, JSON.stringify(filteredData, null, 2));
+//     console.log(`Weather data updated in ${filePath}`);
+//   } catch (error) {
+//     console.error("Error fetching or saving weather data:", error.message);
+//   }
+// }
+
+// app.get("/api/save-weather-history", async (req, res) => {
+//   try {
+//     await fetchAndSaveWeatherHistory();
+//     res.json({ message: "Weather data saved successfully" });
+//   } catch (err) {
+//     res.status(500).json({ error: "Failed to save weather data" });
+//   }
+// });
+
+app.use("/api/ai", aiRoute);
+app.use("/api", actuatorsControl);
 
 // Serve static frontend
 if (process.env.NODE_ENV === "production") {

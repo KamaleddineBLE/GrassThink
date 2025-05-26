@@ -14,10 +14,20 @@ import chev from "../assets/chev.png";
 import SensorCard from "./Indicator";
 import MqttSensorListener from "../services/mqttlistener";
 
-export default function GreenhouseCard({ id, name, onPress, control, Dbdata }) {
+export default function GreenhouseCard({
+  id,
+  name,
+  onPress,
+  control,
+  Dbdata,
+  onSensorUpdate,
+  onPublishReady,
+}) {
   const screenHeight = Dimensions.get("window").height;
   const [data, setData] = useState(Dbdata);
   const topic = `greenhouse/${id}`;
+
+  // console.log("Dbdata", Dbdata);
 
   // Map the sensor data from the database to the required format
   const sensorData = [
@@ -71,6 +81,7 @@ export default function GreenhouseCard({ id, name, onPress, control, Dbdata }) {
   useEffect(() => {
     if (Dbdata) {
       setData(Dbdata);
+      onSensorUpdate?.(id, Dbdata); // Initial DB data sync
     }
   }, [Dbdata]);
 
@@ -84,6 +95,15 @@ export default function GreenhouseCard({ id, name, onPress, control, Dbdata }) {
 
   const chunkedSensors = chunkArray(sensorData, 3);
   const [publishFn, setPublishFn] = useState(null);
+
+  useEffect(() => {
+    console.log(
+      `publishFn : ${publishFn} and onPublishReady: ${onPublishReady}`
+    );
+    if (publishFn && onPublishReady) {
+      onPublishReady(id, publishFn); // Send back to HomeScreen
+    }
+  }, [publishFn]);
   return (
     <View
       onPress={onPress}
@@ -141,7 +161,10 @@ export default function GreenhouseCard({ id, name, onPress, control, Dbdata }) {
       </ImageBackground>
       <MqttSensorListener
         topic={topic}
-        onData={setData}
+        onData={(newData) => {
+          setData(newData);
+          onSensorUpdate?.(id, newData); // Live update from MQTT
+        }}
         onControl={(publishFn) => setPublishFn(() => publishFn)}
       />
     </View>

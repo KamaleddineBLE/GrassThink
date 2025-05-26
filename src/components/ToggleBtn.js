@@ -1,15 +1,18 @@
-import React, { useState, useEffect } from 'react';
-import { View, Text, Pressable, TouchableOpacity, Image } from 'react-native';
+import React, { useState, useEffect } from "react";
+import { View, Text, Pressable, TouchableOpacity, Image } from "react-native";
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
   withTiming,
-} from 'react-native-reanimated';
+} from "react-native-reanimated";
 
-import fan from '../assets/fan.png';
-import tap from '../assets/tap.png';
-import roof from '../assets/roof.png';
-import lamp from '../assets/lamp.png';
+import fan from "../assets/fan.png";
+import tap from "../assets/tap.png";
+import roof from "../assets/roof.png";
+import lamp from "../assets/lamp.png";
+
+import { ref, set, get } from "firebase/database";
+import { database } from "../services/firebase";
 
 export default function ToggleButton({ Control, GhId, publish }) {
   const [control, setControl] = useState({
@@ -22,23 +25,46 @@ export default function ToggleButton({ Control, GhId, publish }) {
 
   const translateX = useSharedValue(6);
 
+  // Fetch latest control state from Firebase on mount
   useEffect(() => {
-    setControl({
-      autoMode: Control.autoMode,
-      pump: Control.pump,
-      fan: Control.fan,
-      light: Control.light,
-      roof: Control.roof,
-    });
-  }, [Control]);
+    const GhIdFirebase = GhId - 1;
+    const controlRef = ref(database, `${GhIdFirebase}/control`);
+    get(controlRef)
+      .then((snapshot) => {
+        if (snapshot.exists()) {
+          setControl(snapshot.val());
+          console.log("🔥 Control fetched from Firebase:", snapshot.val());
+        } else {
+          console.log("ℹ️ No control data found for greenhouse:", GhIdFirebase);
+        }
+      })
+      .catch((error) => console.error("❌ Error fetching control:", error));
+  }, [GhId]);
 
+  // Animate toggle
   useEffect(() => {
     translateX.value = withTiming(control.autoMode ? 60 : 6, { duration: 200 });
   }, [control.autoMode]);
 
   const publishControl = (newControl) => {
-    setControl(newControl);
-    publish && publish(`greenhouse/${GhId}/control`, newControl);
+    const filteredControl = Object.fromEntries(
+      Object.entries(newControl).filter(([_, v]) => v !== undefined)
+    );
+
+    setControl(filteredControl);
+
+    // 1. Publish to MQTT
+    if (publish) {
+      publish(`greenhouse/${GhId}/control`, filteredControl);
+      console.log("✅ MQTT published:", filteredControl);
+    }
+
+    // 2. Update Firebase
+    const GhIdFirebase = GhId - 1;
+    const controlRef = ref(database, `${GhIdFirebase}/control`);
+    set(controlRef, filteredControl)
+      .then(() => console.log("✅ Firebase updated"))
+      .catch((error) => console.error("❌ Firebase error:", error));
   };
 
   const toggleMode = () => {
@@ -60,7 +86,7 @@ export default function ToggleButton({ Control, GhId, publish }) {
       <Pressable
         onPress={toggleMode}
         className={`w-20 h-6 px-2 rounded-xl flex-row items-center z-10 ${
-          control.autoMode ? 'bg-green-400' : 'bg-black'
+          control.autoMode ? "bg-green-400" : "bg-black"
         }`}
       >
         <Animated.View
@@ -70,49 +96,47 @@ export default function ToggleButton({ Control, GhId, publish }) {
           <View
             className={`${
               control.autoMode
-                ? 'w-0.5 h-2 rounded-xl bg-green-400'
-                : 'w-1.5 h-1.5 rounded-full bg-black'
+                ? "w-0.5 h-2 rounded-xl bg-green-400"
+                : "w-1.5 h-1.5 rounded-full bg-black"
             }`}
           />
         </Animated.View>
 
         <View className="flex w-full items-start">
-          <Text  className={`font-semibold text-[10px] text-white
-            ${
-              control.autoMode
-                ? 'ml-4' 
-                : 'ml-6'
-            }
-            `}>
-            {control.autoMode ? 'Auto' : 'Manual'}
+          <Text
+            className={`font-semibold text-[10px] text-white ${
+              control.autoMode ? "ml-4" : "ml-6"
+            }`}
+          >
+            {control.autoMode ? "Auto" : "Manual"}
           </Text>
         </View>
       </Pressable>
 
       {!control.autoMode && (
         <View
-          style={{ gap: '5%' }}
+          style={{ gap: "5%" }}
           className="w-12 h-40 flex items-center pt-5 bg-black rounded-xl absolute top-4 left-6 -mt-1 z-0"
         >
           <ControlButton
             icon={lamp}
             active={control.light}
-            onPress={() => toggleDevice('light')}
+            onPress={() => toggleDevice("light")}
           />
           <ControlButton
             icon={fan}
             active={control.fan}
-            onPress={() => toggleDevice('fan')}
+            onPress={() => toggleDevice("fan")}
           />
           <ControlButton
             icon={tap}
             active={control.pump}
-            onPress={() => toggleDevice('pump')}
+            onPress={() => toggleDevice("pump")}
           />
           <ControlButton
             icon={roof}
             active={control.roof}
-            onPress={() => toggleDevice('roof')}
+            onPress={() => toggleDevice("roof")}
           />
         </View>
       )}
@@ -123,14 +147,14 @@ export default function ToggleButton({ Control, GhId, publish }) {
 function ControlButton({ icon, active, onPress }) {
   return (
     <TouchableOpacity
-      style={{ backgroundColor: '#1E1E1E' }}
+      style={{ backgroundColor: "#1E1E1E" }}
       className="w-6 h-6 rounded-full flex items-center justify-center"
       onPress={onPress}
     >
       <Image
         source={icon}
         style={{
-          resizeMode: 'contain',
+          resizeMode: "contain",
           opacity: active ? 1 : 0.4,
         }}
         className="w-3 h-3.5"

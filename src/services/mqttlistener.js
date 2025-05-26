@@ -2,7 +2,7 @@
 import { useEffect, useState, useRef } from "react";
 import Paho from "paho-mqtt";
 
-const MqttSensorListener = ({ topic, onData,onControl  }) => {
+const MqttSensorListener = ({ topic, onData, onControl }) => {
   const clientRef = useRef(null);
 
   useEffect(() => {
@@ -19,7 +19,7 @@ const MqttSensorListener = ({ topic, onData,onControl  }) => {
 
     client.onMessageArrived = (message) => {
       try {
-        console.log(message)
+        // console.log("MQTT message arrived:", message);
         const data = JSON.parse(message.payloadString);
         onData(data);
       } catch (err) {
@@ -41,15 +41,13 @@ const MqttSensorListener = ({ topic, onData,onControl  }) => {
         client.subscribe(topic);
         if (onControl) {
           onControl((subTopic, msg) => {
-            console.log(msg)
             const mqttMessage = new Paho.Message(JSON.stringify(msg));
             mqttMessage.destinationName = subTopic;
             client.send(mqttMessage);
           });
         }
       },
-      
-    
+
       onFailure: (err) => {
         console.error("MQTT failed", err);
         setTimeout(() => client.connect(connectOptions), 3000);
